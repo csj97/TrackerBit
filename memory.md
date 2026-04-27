@@ -1,0 +1,2 @@
+# Bithumb Tracker Memory
+

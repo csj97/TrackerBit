@@ -1,0 +1,62 @@
+name: Bithumb Hourly Tracker
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 * * * *"
+
+concurrency:
+  group: bithumb-hourly-tracker
+  cancel-in-progress: false
+
+jobs:
+  run-tracker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TZ: Asia/Seoul
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Print time
+        run: date
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Network check
+        run: |
+          python - <<'PY'
+          import socket
+          for host in ["api.bithumb.com", "api.telegram.org"]:
+              try:
+                  print(host, socket.gethostbyname(host))
+              except Exception as e:
+                  raise RuntimeError(f"DNS failed: {host} / {e}")
+          PY
+
+      - name: Run tracker
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          BITHUMB_API_KEY: ${{ secrets.BITHUMB_API_KEY }}
+          BITHUMB_SECRET_KEY: ${{ secrets.BITHUMB_SECRET_KEY }}
+        run: |
+          python bithumb_hourly_tracker.py
+
+      - name: Upload latest report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: latest-report
+          path: latest_report.json
+          if-no-files-found: ignore
