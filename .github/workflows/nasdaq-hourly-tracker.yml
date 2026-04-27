@@ -1,4 +1,4 @@
-name: Bithumb Hourly Tracker
+name: Nasdaq Hourly Tracker
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
     - cron: "*/5 * * * *"
 
 concurrency:
-  group: bithumb-hourly-tracker
+  group: nasdaq-hourly-tracker
   cancel-in-progress: false
 
 jobs:
@@ -55,13 +55,13 @@ jobs:
           repo = os.environ["GH_REPO"]
           run_id = int(os.environ["GH_RUN_ID"])
           token = os.environ["GH_TOKEN"]
-          url = f"https://api.github.com/repos/{repo}/actions/workflows/bithumb-hourly-tracker.yml/runs?event=schedule&per_page=50"
+          url = f"https://api.github.com/repos/{repo}/actions/workflows/nasdaq-hourly-tracker.yml/runs?event=schedule&per_page=50"
           req = urllib.request.Request(
               url,
               headers={
                   "Authorization": f"Bearer {token}",
                   "Accept": "application/vnd.github+json",
-                  "User-Agent": "bithumb-hourly-tracker-gate",
+                  "User-Agent": "nasdaq-hourly-tracker-gate",
               },
           )
           with urllib.request.urlopen(req, timeout=20) as r:
@@ -103,7 +103,7 @@ jobs:
         run: |
           python - <<'PY'
           import socket
-          for host in ["api.bithumb.com", "api.telegram.org"]:
+          for host in ["query1.finance.yahoo.com", "api.telegram.org"]:
               try:
                   print(host, socket.gethostbyname(host))
               except Exception as e:
@@ -115,15 +115,15 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          BITHUMB_API_KEY: ${{ secrets.BITHUMB_API_KEY }}
-          BITHUMB_SECRET_KEY: ${{ secrets.BITHUMB_SECRET_KEY }}
+          TELEGRAM_BOT_TOKEN_NASDAQ: ${{ secrets.TELEGRAM_BOT_TOKEN_NASDAQ }}
+          TELEGRAM_CHAT_ID_NASDAQ: ${{ secrets.TELEGRAM_CHAT_ID_NASDAQ }}
         run: |
-          python bithumb_hourly_tracker.py
+          python nasdaq_hourly_tracker.py
 
       - name: Upload latest report
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: latest-report
-          path: latest_report.json
+          name: latest-report-nasdaq
+          path: latest_report_nasdaq.json
           if-no-files-found: ignore

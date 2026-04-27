@@ -1,1 +1,5 @@
 .env.telegram
+__pycache__/
+*.pyc
+latest_report.json
+latest_report_nasdaq.json
