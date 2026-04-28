@@ -5,10 +5,12 @@ import socket
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+from http.cookiejar import CookieJar
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from statistics import mean
+from urllib.error import HTTPError, URLError
 from zoneinfo import ZoneInfo
 
 KST = ZoneInfo("Asia/Seoul")
@@ -18,6 +20,18 @@ UTC = timezone.utc
 ROOT_DIR = Path(__file__).resolve().parent
 MEMORY_PATH = ROOT_DIR / "memory.md"
 REPORT_PATH = ROOT_DIR / "latest_report_global_equity.json"
+YAHOO_HOSTS = ("query1.finance.yahoo.com", "query2.finance.yahoo.com")
+YAHOO_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    ),
+    "Accept": "application/json,text/plain,*/*",
+    "Accept-Language": "en-US,en;q=0.9,ko-KR;q=0.8",
+    "Referer": "https://finance.yahoo.com/",
+}
+YAHOO_OPENER = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(CookieJar()))
+YAHOO_CRUMB = None
 
 
 def now_kst_str() -> str:
@@ -34,7 +48,76 @@ def check_dns(hosts):
         socket.gethostbyname(host)
 
 
+def _is_yahoo_url(url: str) -> bool:
+    return any(h in url for h in YAHOO_HOSTS)
+
+
+def _append_query(url: str, key: str, value: str) -> str:
+    p = urllib.parse.urlparse(url)
+    q = urllib.parse.parse_qsl(p.query, keep_blank_values=True)
+    q.append((key, value))
+    return urllib.parse.urlunparse((p.scheme, p.netloc, p.path, p.params, urllib.parse.urlencode(q), p.fragment))
+
+
+def _prime_yahoo_session(timeout: int):
+    req = urllib.request.Request("https://finance.yahoo.com/", headers=YAHOO_HEADERS)
+    with YAHOO_OPENER.open(req, timeout=timeout):
+        pass
+
+
+def _get_yahoo_crumb(timeout: int) -> str:
+    global YAHOO_CRUMB
+    if YAHOO_CRUMB:
+        return YAHOO_CRUMB
+    _prime_yahoo_session(timeout)
+    for crumb_url in (
+        "https://query1.finance.yahoo.com/v1/test/getcrumb",
+        "https://query2.finance.yahoo.com/v1/test/getcrumb",
+    ):
+        req = urllib.request.Request(crumb_url, headers=YAHOO_HEADERS)
+        try:
+            with YAHOO_OPENER.open(req, timeout=timeout) as r:
+                crumb = r.read().decode("utf-8", errors="replace").strip()
+            if crumb and "html" not in crumb.lower():
+                YAHOO_CRUMB = crumb
+                return crumb
+        except Exception:
+            continue
+    raise RuntimeError("yahoo crumb acquisition failed")
+
+
+def _fetch_yahoo_json(url: str, timeout: int = 20):
+    global YAHOO_CRUMB
+    candidates = [url]
+    if "query1.finance.yahoo.com" in url:
+        candidates.append(url.replace("query1.finance.yahoo.com", "query2.finance.yahoo.com", 1))
+
+    last_err = None
+    # 1st pass: plain request, 2nd pass: crumb-attached request after 401/403.
+    for pass_idx in range(2):
+        for target in candidates:
+            req_url = target
+            if pass_idx == 1:
+                crumb = _get_yahoo_crumb(timeout)
+                req_url = _append_query(target, "crumb", crumb)
+            req = urllib.request.Request(req_url, headers=YAHOO_HEADERS)
+            try:
+                with YAHOO_OPENER.open(req, timeout=timeout) as r:
+                    return json.load(r)
+            except HTTPError as e:
+                last_err = e
+                if e.code in (401, 403):
+                    YAHOO_CRUMB = None
+                continue
+            except URLError as e:
+                last_err = e
+                continue
+    raise RuntimeError(f"Yahoo fetch failed: {last_err}")
+
+
 def fetch_json(url: str, timeout: int = 20):
+    if _is_yahoo_url(url):
+        return _fetch_yahoo_json(url, timeout=timeout)
     req = urllib.request.Request(url, headers={"User-Agent": "global-equity-tracker"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.load(r)
@@ -44,6 +127,18 @@ def fetch_text(url: str, timeout: int = 20):
     req = urllib.request.Request(url, headers={"User-Agent": "global-equity-tracker"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read().decode("utf-8", errors="replace")
+
+
+def diagnose_yahoo_access():
+    test_url = "https://query1.finance.yahoo.com/v7/finance/quote?symbols=%5EIXIC"
+    try:
+        payload = fetch_json(test_url, timeout=20)
+        rows = payload.get("quoteResponse", {}).get("result", [])
+        if rows:
+            return True, "ok"
+        return False, "empty-result"
+    except Exception as e:
+        return False, str(e)
 
 
 def ema(values, span):
@@ -97,14 +192,20 @@ def parse_universe(env_key: str, default_csv: str):
 
 def get_quote(symbols):
     encoded = urllib.parse.quote(",".join(symbols))
-    payload = fetch_json(f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={encoded}")
-    rows = payload.get("quoteResponse", {}).get("result", [])
-    return {r.get("symbol"): r for r in rows}
+    try:
+        payload = fetch_json(f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={encoded}")
+        rows = payload.get("quoteResponse", {}).get("result", [])
+        return {r.get("symbol"): r for r in rows}
+    except Exception:
+        return {}
 
 
 def get_chart(symbol: str, interval: str, rng: str):
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(symbol)}?interval={interval}&range={rng}"
-    payload = fetch_json(url)
+    try:
+        payload = fetch_json(url)
+    except Exception:
+        return []
     result = payload.get("chart", {}).get("result", [])
     if not result:
         return []
@@ -314,6 +415,8 @@ def get_macro_snapshot():
         elif vix > 22 or tnx > 4.9:
             regime = "리스크오프"
     lines.append(f"- 현재 체제 판단: {regime}")
+    if not q:
+        lines.append("- 주의: 실시간 시세 조회 실패(대체/캐시 데이터 없이 생성)")
     return lines
 
 
@@ -520,6 +623,7 @@ def main():
         check_dns(
             [
                 "query1.finance.yahoo.com",
+                "query2.finance.yahoo.com",
                 "news.google.com",
                 "api.telegram.org",
             ]
@@ -527,6 +631,10 @@ def main():
     except Exception as e:
         append_memory(f"DNS 실패: {e}")
         raise SystemExit(f"DNS check failed: {e}")
+
+    yahoo_ok, yahoo_reason = diagnose_yahoo_access()
+    if not yahoo_ok:
+        append_memory(f"Yahoo 접근 진단 실패: {yahoo_reason}")
 
     text, payload = build_message(event_type, event_dt)
     with open(REPORT_PATH, "w", encoding="utf-8") as f:
