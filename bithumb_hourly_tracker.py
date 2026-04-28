@@ -15,6 +15,8 @@ KST = timezone(timedelta(hours=9))
 ROOT_DIR = Path(__file__).resolve().parent
 MEMORY_PATH = ROOT_DIR / "memory.md"
 REPORT_PATH = ROOT_DIR / "latest_report.json"
+AGENT_TAG = "BITHUMB"
+AGENT_TITLE = "Bithumb Hourly Tracker"
 
 
 def get_json(url: str):
@@ -27,9 +29,17 @@ def now_kst():
 
 
 def append_memory(message: str):
-    line = f"- [{now_kst()}] {message}\n"
+    line = f"- [{now_kst()}] [{AGENT_TAG}] {message}\n"
     with open(MEMORY_PATH, "a", encoding="utf-8") as f:
         f.write(line)
+
+
+def build_header(now: str, status: str, summary: str):
+    return [
+        f"[{AGENT_TITLE}] {now}",
+        f"- 상태: {status}",
+        f"- 요약: {summary}",
+    ]
 
 
 def check_dns(hosts):
@@ -269,15 +279,15 @@ def build_report(topn=30):
         ticker = get_json(f"{BASE}/ticker/ALL_KRW")
     except Exception as e:
         err = f"Bithumb ticker 호출 실패: {e}"
-        text = "\n".join(
-            [
-                f"[빗썸 1시간 트래킹] {now}",
-                "- 결론: API 실패로 분석 불가",
-                f"- 오류: {err}",
-            ]
-        )
+        status = "API_FALLBACK"
+        summary = "시세 API 호출 실패로 분석 불가"
+        text = "\n".join(build_header(now, status, summary) + ["- 오류: " + err])
         return {
             "generated_at": now,
+            "agent": AGENT_TAG,
+            "status": status,
+            "summary": summary,
+            "errors": [err],
             "topn": topn,
             "top3": [],
             "analyzed": [],
@@ -287,15 +297,15 @@ def build_report(topn=30):
 
     if ticker.get("status") != "0000":
         err = f"Bithumb ticker API error(status={ticker.get('status')})"
-        text = "\n".join(
-            [
-                f"[빗썸 1시간 트래킹] {now}",
-                "- 결론: API 실패로 분석 불가",
-                f"- 오류: {err}",
-            ]
-        )
+        status = "API_FALLBACK"
+        summary = "시세 API status 비정상으로 분석 불가"
+        text = "\n".join(build_header(now, status, summary) + ["- 오류: " + err])
         return {
             "generated_at": now,
+            "agent": AGENT_TAG,
+            "status": status,
+            "summary": summary,
+            "errors": [err],
             "topn": topn,
             "top3": [],
             "analyzed": [],
@@ -328,8 +338,9 @@ def build_report(topn=30):
     excluded = [x for x in analyzed if x.get("status") == "EXCLUDE"]
     excluded.sort(key=lambda x: x.get("score", 0), reverse=True)
 
-    header = [
-        f"[빗썸 1시간 트래킹] {now}",
+    status = "OK"
+    summary = f"PASS {len(top3)} / 대상 {topn}"
+    header = build_header(now, status, summary) + [
         f"- 대상: KRW 거래대금 상위 {topn} (USDT/STABLE 제외)",
         "- 기준: 4H+일봉, 거래량/지지저항/매물대/EMA/피보나치/캔들, 즉시매수 가능성",
     ]
@@ -365,6 +376,10 @@ def build_report(topn=30):
 
     payload = {
         "generated_at": now,
+        "agent": AGENT_TAG,
+        "status": status,
+        "summary": summary,
+        "errors": [],
         "topn": topn,
         "top3": top3,
         "analyzed": analyzed,

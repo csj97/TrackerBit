@@ -5,12 +5,10 @@ import socket
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
-from http.cookiejar import CookieJar
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from statistics import mean
-from urllib.error import HTTPError, URLError
 from zoneinfo import ZoneInfo
 
 KST = ZoneInfo("Asia/Seoul")
@@ -20,18 +18,6 @@ UTC = timezone.utc
 ROOT_DIR = Path(__file__).resolve().parent
 MEMORY_PATH = ROOT_DIR / "memory.md"
 REPORT_PATH = ROOT_DIR / "latest_report_global_equity.json"
-YAHOO_HOSTS = ("query1.finance.yahoo.com", "query2.finance.yahoo.com")
-YAHOO_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-    ),
-    "Accept": "application/json,text/plain,*/*",
-    "Accept-Language": "en-US,en;q=0.9,ko-KR;q=0.8",
-    "Referer": "https://finance.yahoo.com/",
-}
-YAHOO_OPENER = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(CookieJar()))
-YAHOO_CRUMB = None
 
 
 def now_kst_str() -> str:
@@ -47,77 +33,7 @@ def check_dns(hosts):
     for host in hosts:
         socket.gethostbyname(host)
 
-
-def _is_yahoo_url(url: str) -> bool:
-    return any(h in url for h in YAHOO_HOSTS)
-
-
-def _append_query(url: str, key: str, value: str) -> str:
-    p = urllib.parse.urlparse(url)
-    q = urllib.parse.parse_qsl(p.query, keep_blank_values=True)
-    q.append((key, value))
-    return urllib.parse.urlunparse((p.scheme, p.netloc, p.path, p.params, urllib.parse.urlencode(q), p.fragment))
-
-
-def _prime_yahoo_session(timeout: int):
-    req = urllib.request.Request("https://finance.yahoo.com/", headers=YAHOO_HEADERS)
-    with YAHOO_OPENER.open(req, timeout=timeout):
-        pass
-
-
-def _get_yahoo_crumb(timeout: int) -> str:
-    global YAHOO_CRUMB
-    if YAHOO_CRUMB:
-        return YAHOO_CRUMB
-    _prime_yahoo_session(timeout)
-    for crumb_url in (
-        "https://query1.finance.yahoo.com/v1/test/getcrumb",
-        "https://query2.finance.yahoo.com/v1/test/getcrumb",
-    ):
-        req = urllib.request.Request(crumb_url, headers=YAHOO_HEADERS)
-        try:
-            with YAHOO_OPENER.open(req, timeout=timeout) as r:
-                crumb = r.read().decode("utf-8", errors="replace").strip()
-            if crumb and "html" not in crumb.lower():
-                YAHOO_CRUMB = crumb
-                return crumb
-        except Exception:
-            continue
-    raise RuntimeError("yahoo crumb acquisition failed")
-
-
-def _fetch_yahoo_json(url: str, timeout: int = 20):
-    global YAHOO_CRUMB
-    candidates = [url]
-    if "query1.finance.yahoo.com" in url:
-        candidates.append(url.replace("query1.finance.yahoo.com", "query2.finance.yahoo.com", 1))
-
-    last_err = None
-    # 1st pass: plain request, 2nd pass: crumb-attached request after 401/403.
-    for pass_idx in range(2):
-        for target in candidates:
-            req_url = target
-            if pass_idx == 1:
-                crumb = _get_yahoo_crumb(timeout)
-                req_url = _append_query(target, "crumb", crumb)
-            req = urllib.request.Request(req_url, headers=YAHOO_HEADERS)
-            try:
-                with YAHOO_OPENER.open(req, timeout=timeout) as r:
-                    return json.load(r)
-            except HTTPError as e:
-                last_err = e
-                if e.code in (401, 403):
-                    YAHOO_CRUMB = None
-                continue
-            except URLError as e:
-                last_err = e
-                continue
-    raise RuntimeError(f"Yahoo fetch failed: {last_err}")
-
-
 def fetch_json(url: str, timeout: int = 20):
-    if _is_yahoo_url(url):
-        return _fetch_yahoo_json(url, timeout=timeout)
     req = urllib.request.Request(url, headers={"User-Agent": "global-equity-tracker"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.load(r)
@@ -129,16 +45,129 @@ def fetch_text(url: str, timeout: int = 20):
         return r.read().decode("utf-8", errors="replace")
 
 
-def diagnose_yahoo_access():
-    test_url = "https://query1.finance.yahoo.com/v7/finance/quote?symbols=%5EIXIC"
+def parse_float(value):
+    if value is None:
+        return None
     try:
-        payload = fetch_json(test_url, timeout=20)
-        rows = payload.get("quoteResponse", {}).get("result", [])
-        if rows:
-            return True, "ok"
-        return False, "empty-result"
-    except Exception as e:
-        return False, str(e)
+        return float(str(value).replace(",", "").strip())
+    except Exception:
+        return None
+
+
+def fetch_stooq_last(symbol: str):
+    # Stooq lightweight CSV endpoint.
+    url = f"https://stooq.com/q/l/?s={urllib.parse.quote(symbol)}&f=sd2t2ohlcv&h&e=csv"
+    text = fetch_text(url, timeout=20)
+    lines = [x.strip() for x in text.splitlines() if x.strip()]
+    if len(lines) < 2:
+        raise RuntimeError("no-csv-row")
+    cols = [c.strip() for c in lines[1].split(",")]
+    if not cols or cols[0].upper() == "N/D":
+        raise RuntimeError("symbol-not-found")
+    close_val = parse_float(cols[6] if len(cols) > 6 else None)
+    if close_val is None:
+        raise RuntimeError("close-missing")
+    return {"price": close_val, "source": f"stooq:{symbol}"}
+
+
+def stooq_symbol(symbol: str) -> str:
+    sym = symbol.strip().lower()
+    if sym.endswith(".ks"):
+        return f"{sym[:-3]}.kr"
+    if sym.endswith(".kq"):
+        return f"{sym[:-3]}.kq"
+    return sym
+
+
+def stooq_interval_code(interval: str) -> str:
+    return "w" if interval == "1wk" else "d"
+
+
+def fetch_stooq_history(symbol: str, interval: str):
+    ss = stooq_symbol(symbol)
+    i = stooq_interval_code(interval)
+    # Historical CSV: Date,Open,High,Low,Close,Volume
+    url = f"https://stooq.com/q/d/l/?s={urllib.parse.quote(ss)}&i={i}"
+    text = fetch_text(url, timeout=25)
+    lines = [x.strip() for x in text.splitlines() if x.strip()]
+    if len(lines) < 2:
+        return []
+    out = []
+    for raw in lines[1:]:
+        cols = [c.strip() for c in raw.split(",")]
+        if len(cols) < 6:
+            continue
+        o = parse_float(cols[1])
+        h = parse_float(cols[2])
+        l = parse_float(cols[3])
+        c = parse_float(cols[4])
+        v = parse_float(cols[5]) or 0.0
+        if None in (o, h, l, c):
+            continue
+        out.append({"open": o, "high": h, "low": l, "close": c, "volume": v})
+    return out
+
+
+def fetch_naver_index(index_code: str):
+    # index_code: KOSPI or KOSDAQ
+    payload = fetch_json(f"https://polling.finance.naver.com/api/realtime?query=SERVICE_INDEX:{index_code}")
+
+    def walk(obj):
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                lk = k.lower()
+                if lk in {"closeprice", "compareto", "fluctuaterate"}:
+                    continue
+                yield from walk(v)
+            cp = parse_float(obj.get("closePrice"))
+            ch = parse_float(obj.get("compareTo"))
+            rp = parse_float(obj.get("fluctuateRate"))
+            if cp is not None:
+                return {"price": cp, "change": ch, "change_pct": rp, "source": f"naver:{index_code}"}
+        elif isinstance(obj, list):
+            for it in obj:
+                found = walk(it)
+                if found:
+                    return found
+        return None
+
+    found = walk(payload)
+    if not found:
+        raise RuntimeError("naver-index-parse-failed")
+    return found
+
+
+def fetch_usdkrw_frankfurter():
+    payload = fetch_json("https://api.frankfurter.app/latest?from=USD&to=KRW")
+    rate = parse_float((payload.get("rates") or {}).get("KRW"))
+    if rate is None:
+        raise RuntimeError("frankfurter-rate-missing")
+    return {"price": rate, "source": "frankfurter:USDKRW"}
+
+
+def resolve_metric(name, resolvers):
+    errors = []
+    for source_name, fn in resolvers:
+        try:
+            result = fn()
+            result["name"] = name
+            return result, errors
+        except Exception as e:
+            errors.append(f"{source_name}:{e}")
+    return None, errors
+
+
+def format_metric_line(metric):
+    p = metric.get("price")
+    c = metric.get("change")
+    cp = metric.get("change_pct")
+    src = metric.get("source", "unknown")
+    if p is None:
+        return f"- {metric['name']}: 수집 실패 (source={src})"
+    if c is not None and cp is not None:
+        arrow = "▲" if c >= 0 else "▼"
+        return f"- {metric['name']}: {p:.2f} ({arrow} {c:+.2f}, {cp:+.2f}%) [{src}]"
+    return f"- {metric['name']}: {p:.2f} [변화값 없음, {src}]"
 
 
 def ema(values, span):
@@ -190,52 +219,10 @@ def parse_universe(env_key: str, default_csv: str):
     return [s.strip().upper() for s in raw.split(",") if s.strip()]
 
 
-def get_quote(symbols):
-    encoded = urllib.parse.quote(",".join(symbols))
-    try:
-        payload = fetch_json(f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={encoded}")
-        rows = payload.get("quoteResponse", {}).get("result", [])
-        return {r.get("symbol"): r for r in rows}
-    except Exception:
-        return {}
-
-
 def get_chart(symbol: str, interval: str, rng: str):
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(symbol)}?interval={interval}&range={rng}"
-    try:
-        payload = fetch_json(url)
-    except Exception:
-        return []
-    result = payload.get("chart", {}).get("result", [])
-    if not result:
-        return []
-    result = result[0]
-    q = result.get("indicators", {}).get("quote", [{}])[0]
-    closes = q.get("close", [])
-    opens = q.get("open", [])
-    highs = q.get("high", [])
-    lows = q.get("low", [])
-    vols = q.get("volume", [])
-    ts = result.get("timestamp", [])
-    out = []
-    for i in range(len(ts)):
-        if i >= len(closes) or closes[i] is None:
-            continue
-        if i >= len(highs) or i >= len(lows) or i >= len(opens):
-            continue
-        if highs[i] is None or lows[i] is None or opens[i] is None:
-            continue
-        out.append(
-            {
-                "ts": ts[i],
-                "open": float(opens[i]),
-                "high": float(highs[i]),
-                "low": float(lows[i]),
-                "close": float(closes[i]),
-                "volume": float(vols[i] or 0.0) if i < len(vols) else 0.0,
-            }
-        )
-    return out
+    # `rng` is kept for compatibility but history depth is controlled via downstream slice lengths.
+    _ = rng
+    return fetch_stooq_history(symbol, interval)
 
 
 @dataclass
@@ -249,7 +236,7 @@ class Pick:
     reason: str
 
 
-def score_long_term(symbol: str, quote_row: dict):
+def score_long_term(symbol: str, quote_row: dict | None = None):
     daily = get_chart(symbol, "1d", "2y")
     weekly = get_chart(symbol, "1wk", "5y")
     if len(daily) < 120 or len(weekly) < 80:
@@ -273,6 +260,7 @@ def score_long_term(symbol: str, quote_row: dict):
         return None
     atr_pct = atr14 / price * 100 if price > 0 else 999
 
+    quote_row = quote_row or {}
     market_cap = float(quote_row.get("marketCap") or 0)
     pe = quote_row.get("trailingPE")
     score = 0.0
@@ -306,7 +294,7 @@ def score_long_term(symbol: str, quote_row: dict):
     return Pick(symbol=symbol, score=round(score, 1), entry=price, stop=stop, target=target, rr=round(rr, 2), reason=reason)
 
 
-def score_swing(symbol: str, quote_row: dict):
+def score_swing(symbol: str, quote_row: dict | None = None):
     daily = get_chart(symbol, "1d", "1y")
     if len(daily) < 90:
         return None
@@ -380,34 +368,86 @@ def detect_event(now_utc: datetime):
 
 
 def get_macro_snapshot():
-    symbols = ["^KS11", "^KQ11", "KRW=X", "^GSPC", "^IXIC", "^DJI", "^VIX", "^TNX", "DX-Y.NYB"]
-    q = get_quote(symbols)
+    errors = []
 
-    def fmt(sym, name):
-        row = q.get(sym, {})
-        p = row.get("regularMarketPrice")
-        c = row.get("regularMarketChange")
-        cp = row.get("regularMarketChangePercent")
-        if p is None or c is None or cp is None:
-            return f"- {name}: 데이터 부족"
-        arrow = "▲" if c >= 0 else "▼"
-        return f"- {name}: {p:.2f} ({arrow} {c:+.2f}, {cp:+.2f}%)"
-
-    lines = [
-        "거시/시장 스냅샷",
-        fmt("^KS11", "KOSPI"),
-        fmt("^KQ11", "KOSDAQ"),
-        fmt("KRW=X", "USD/KRW"),
-        fmt("^GSPC", "S&P500"),
-        fmt("^IXIC", "NASDAQ"),
-        fmt("^DJI", "DOW"),
-        fmt("^VIX", "VIX"),
-        fmt("^TNX", "US10Y"),
-        fmt("DX-Y.NYB", "DXY"),
+    metric_defs = [
+        (
+            "KOSPI",
+            [
+                ("naver", lambda: fetch_naver_index("KOSPI")),
+                ("stooq", lambda: fetch_stooq_last("kospi")),
+            ],
+        ),
+        (
+            "KOSDAQ",
+            [
+                ("naver", lambda: fetch_naver_index("KOSDAQ")),
+                ("stooq", lambda: fetch_stooq_last("kosdaq")),
+            ],
+        ),
+        (
+            "USD/KRW",
+            [
+                ("frankfurter", fetch_usdkrw_frankfurter),
+            ],
+        ),
+        (
+            "S&P500",
+            [
+                ("stooq", lambda: fetch_stooq_last("^spx")),
+                ("stooq", lambda: fetch_stooq_last("spx")),
+            ],
+        ),
+        (
+            "NASDAQ",
+            [
+                ("stooq", lambda: fetch_stooq_last("^ndq")),
+                ("stooq", lambda: fetch_stooq_last("comp")),
+            ],
+        ),
+        (
+            "DOW",
+            [
+                ("stooq", lambda: fetch_stooq_last("^dji")),
+                ("stooq", lambda: fetch_stooq_last("dji")),
+            ],
+        ),
+        (
+            "VIX",
+            [
+                ("stooq", lambda: fetch_stooq_last("vix")),
+            ],
+        ),
+        (
+            "US10Y",
+            [
+                ("stooq", lambda: fetch_stooq_last("us10y")),
+            ],
+        ),
+        (
+            "DXY",
+            [
+                ("stooq", lambda: fetch_stooq_last("usdidx")),
+                ("stooq", lambda: fetch_stooq_last("dxy")),
+            ],
+        ),
     ]
 
-    vix = (q.get("^VIX", {}) or {}).get("regularMarketPrice")
-    tnx = (q.get("^TNX", {}) or {}).get("regularMarketPrice")
+    metrics = {}
+    lines = ["거시/시장 스냅샷"]
+    for name, resolvers in metric_defs:
+        metric, metric_errors = resolve_metric(name, resolvers)
+        if metric is None:
+            metrics[name] = None
+            err_preview = ", ".join(metric_errors[:2]) if metric_errors else "unknown"
+            lines.append(f"- {name}: 수집 실패 ({err_preview})")
+            errors.extend(metric_errors[:2])
+            continue
+        metrics[name] = metric
+        lines.append(format_metric_line(metric))
+
+    vix = (metrics.get("VIX") or {}).get("price")
+    tnx = (metrics.get("US10Y") or {}).get("price")
     regime = "중립"
     if vix is not None and tnx is not None:
         if vix < 17 and tnx < 4.7:
@@ -415,8 +455,8 @@ def get_macro_snapshot():
         elif vix > 22 or tnx > 4.9:
             regime = "리스크오프"
     lines.append(f"- 현재 체제 판단: {regime}")
-    if not q:
-        lines.append("- 주의: 실시간 시세 조회 실패(대체/캐시 데이터 없이 생성)")
+    if errors:
+        lines.append(f"- 데이터 소스 경고: {', '.join(errors[:4])}")
     return lines
 
 
@@ -438,16 +478,22 @@ def get_issue_headlines():
         "https://news.google.com/rss/search?q=미국+금리+연준+정책&hl=ko&gl=KR&ceid=KR:ko",
         "https://news.google.com/rss/search?q=한국+정치+경제+정책&hl=ko&gl=KR&ceid=KR:ko",
         "https://news.google.com/rss/search?q=지정학+리스크+유가&hl=ko&gl=KR&ceid=KR:ko",
+        "https://feeds.reuters.com/reuters/businessNews",
+        "https://feeds.reuters.com/Reuters/worldNews",
     ]
     out = ["정치/경제/이슈 헤드라인"]
+    errs = []
     for u in urls:
         try:
             for h in parse_rss_headlines(u, 2):
                 out.append(f"- {h}")
-        except Exception:
+        except Exception as e:
+            errs.append(f"{u}:{e}")
             continue
     if len(out) == 1:
         out.append("- 주요 헤드라인 수집 실패")
+    if errs:
+        out.append(f"- 헤드라인 소스 경고: {', '.join(errs[:2])}")
     return out[:8]
 
 
@@ -471,11 +517,8 @@ def build_recommendations(region: str):
             "QQQ,SOXX,SMH,NVDA,AMD,META,TSLA,AMZN",
         )
 
-    all_symbols = sorted(set(long_uni + swing_uni))
-    quotes = get_quote(all_symbols)
-
-    long_picks = [score_long_term(s, quotes.get(s, {})) for s in long_uni]
-    swing_picks = [score_swing(s, quotes.get(s, {})) for s in swing_uni]
+    long_picks = [score_long_term(s, {}) for s in long_uni]
+    swing_picks = [score_swing(s, {}) for s in swing_uni]
     return choose_top(long_picks, min_score=55), choose_top(swing_picks, min_score=58)
 
 
@@ -622,19 +665,17 @@ def main():
     try:
         check_dns(
             [
-                "query1.finance.yahoo.com",
-                "query2.finance.yahoo.com",
                 "news.google.com",
+                "feeds.reuters.com",
                 "api.telegram.org",
+                "stooq.com",
+                "polling.finance.naver.com",
+                "api.frankfurter.app",
             ]
         )
     except Exception as e:
         append_memory(f"DNS 실패: {e}")
         raise SystemExit(f"DNS check failed: {e}")
-
-    yahoo_ok, yahoo_reason = diagnose_yahoo_access()
-    if not yahoo_ok:
-        append_memory(f"Yahoo 접근 진단 실패: {yahoo_reason}")
 
     text, payload = build_message(event_type, event_dt)
     with open(REPORT_PATH, "w", encoding="utf-8") as f:

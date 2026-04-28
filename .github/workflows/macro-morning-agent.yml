@@ -1,0 +1,51 @@
+name: Macro Morning AI Agent
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 23 * * *" # Every day 08:00 KST
+
+concurrency:
+  group: macro-morning-agent
+  cancel-in-progress: false
+
+jobs:
+  run-agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      TZ: Asia/Seoul
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Print time
+        run: date
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run macro morning agent
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_BOT_TOKEN_MACRO: ${{ secrets.TELEGRAM_BOT_TOKEN_MACRO }}
+          TELEGRAM_CHAT_ID_MACRO: ${{ secrets.TELEGRAM_CHAT_ID_MACRO }}
+        run: |
+          python macro_morning_agent.py
+
+      - name: Upload latest report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: latest-report-macro-morning-agent
+          path: latest_report_macro_agent.json
+          if-no-files-found: ignore

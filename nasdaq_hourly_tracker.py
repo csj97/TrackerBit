@@ -11,6 +11,8 @@ KST = timezone(timedelta(hours=9))
 ROOT_DIR = Path(__file__).resolve().parent
 MEMORY_PATH = ROOT_DIR / "memory.md"
 REPORT_PATH = ROOT_DIR / "latest_report_nasdaq.json"
+AGENT_TAG = "NASDAQ"
+AGENT_TITLE = "Nasdaq Hourly Tracker"
 
 
 def now_kst():
@@ -18,9 +20,26 @@ def now_kst():
 
 
 def append_memory(message: str):
-    line = f"- [{now_kst()}] {message}\n"
+    line = f"- [{now_kst()}] [{AGENT_TAG}] {message}\n"
     with open(MEMORY_PATH, "a", encoding="utf-8") as f:
         f.write(line)
+
+
+def build_header(now: str, status: str, summary: str):
+    return [
+        f"[{AGENT_TITLE}] {now}",
+        f"- 상태: {status}",
+        f"- 요약: {summary}",
+    ]
+
+
+def to_num(v, default=0.0):
+    try:
+        if v is None:
+            return default
+        return float(v)
+    except Exception:
+        return default
 
 
 def check_dns(hosts):
@@ -45,15 +64,15 @@ def build_report():
         rows = payload.get("quoteResponse", {}).get("result", [])
     except Exception as e:
         err = f"Yahoo quote 호출 실패: {e}"
-        text = "\n".join(
-            [
-                f"[미국장 1시간 체크] {now}",
-                "- 결론: 시세 조회 실패",
-                f"- 오류: {err}",
-            ]
-        )
+        status = "API_FALLBACK"
+        summary = "시세 조회 실패"
+        text = "\n".join(build_header(now, status, summary) + ["- 오류: " + err])
         return {
             "generated_at": now,
+            "agent": AGENT_TAG,
+            "status": status,
+            "summary": summary,
+            "errors": [err],
             "text": text,
             "rows": [],
             "api_error": err,
@@ -61,15 +80,15 @@ def build_report():
 
     if not rows:
         err = "Yahoo quote 결과 비어 있음"
-        text = "\n".join(
-            [
-                f"[미국장 1시간 체크] {now}",
-                "- 결론: 시세 조회 실패",
-                f"- 오류: {err}",
-            ]
-        )
+        status = "API_FALLBACK"
+        summary = "시세 결과 비어 있음"
+        text = "\n".join(build_header(now, status, summary) + ["- 오류: " + err])
         return {
             "generated_at": now,
+            "agent": AGENT_TAG,
+            "status": status,
+            "summary": summary,
+            "errors": [err],
             "text": text,
             "rows": [],
             "api_error": err,
@@ -82,13 +101,15 @@ def build_report():
         "^VIX": "VIX",
     }
 
-    lines = [f"[미국장 1시간 체크] {now}"]
+    status = "OK"
+    summary = "미국 주요 지수 4종 시세 수집 완료"
+    lines = build_header(now, status, summary)
     normalized = []
     for row in rows:
         symbol = row.get("symbol", "")
-        price = row.get("regularMarketPrice")
-        chg = row.get("regularMarketChange")
-        chg_pct = row.get("regularMarketChangePercent")
+        price = to_num(row.get("regularMarketPrice"), None)
+        chg = to_num(row.get("regularMarketChange"), 0.0)
+        chg_pct = to_num(row.get("regularMarketChangePercent"), 0.0)
         if price is None:
             continue
         arrow = "▲" if (chg or 0) >= 0 else "▼"
@@ -107,6 +128,10 @@ def build_report():
     text = "\n".join(lines)
     return {
         "generated_at": now,
+        "agent": AGENT_TAG,
+        "status": status,
+        "summary": summary,
+        "errors": [],
         "text": text,
         "rows": normalized,
     }
@@ -139,7 +164,7 @@ def main():
     try:
         check_dns(["query1.finance.yahoo.com", "api.telegram.org"])
     except Exception as e:
-        append_memory(f"[NASDAQ] DNS 실패: {e}")
+        append_memory(f"DNS 실패: {e}")
         raise SystemExit(f"DNS check failed: {e}")
 
     report = build_report()
@@ -147,18 +172,18 @@ def main():
         json.dump(report, f, ensure_ascii=False, indent=2)
 
     if report.get("api_error"):
-        append_memory(f"[NASDAQ] API 실패 fallback 실행: {report['api_error']}")
+        append_memory(f"API 실패 fallback 실행: {report['api_error']}")
 
     try:
         resp = send_telegram(bot_token, chat_id, report["text"])
     except Exception as e:
-        append_memory(f"[NASDAQ] Telegram 전송 실패: {e}")
+        append_memory(f"Telegram 전송 실패: {e}")
         raise RuntimeError(f"telegram send failed: {e}")
     if not resp.get("ok"):
-        append_memory(f"[NASDAQ] Telegram 응답 실패: {resp}")
+        append_memory(f"Telegram 응답 실패: {resp}")
         raise RuntimeError(f"telegram send failed: {resp}")
 
-    append_memory("[NASDAQ] 정상 실행 완료")
+    append_memory("정상 실행 완료")
     print("SENT", report["generated_at"])
 
 
