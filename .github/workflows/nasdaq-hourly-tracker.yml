@@ -2,8 +2,6 @@ name: Nasdaq Hourly Tracker
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "*/5 * * * *"
 
 concurrency:
   group: nasdaq-hourly-tracker
@@ -13,9 +11,6 @@ jobs:
   run-tracker:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    permissions:
-      contents: read
-      actions: read
     env:
       TZ: Asia/Seoul
 
@@ -31,75 +26,12 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Decide whether to run this hour
-        id: gate
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          GH_RUN_ID: ${{ github.run_id }}
-          GH_EVENT: ${{ github.event_name }}
-        run: |
-          python - <<'PY'
-          import json
-          import os
-          import urllib.request
-          from datetime import datetime, timedelta, timezone
-
-          event = os.environ["GH_EVENT"]
-          if event != "schedule":
-              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
-                  out.write("should_run=true\n")
-              print("manual run -> execute")
-              raise SystemExit(0)
-
-          repo = os.environ["GH_REPO"]
-          run_id = int(os.environ["GH_RUN_ID"])
-          token = os.environ["GH_TOKEN"]
-          url = f"https://api.github.com/repos/{repo}/actions/workflows/nasdaq-hourly-tracker.yml/runs?event=schedule&per_page=50"
-          req = urllib.request.Request(
-              url,
-              headers={
-                  "Authorization": f"Bearer {token}",
-                  "Accept": "application/vnd.github+json",
-                  "User-Agent": "nasdaq-hourly-tracker-gate",
-              },
-          )
-          with urllib.request.urlopen(req, timeout=20) as r:
-              payload = json.load(r)
-
-          now_utc = datetime.now(timezone.utc)
-          kst = timezone(timedelta(hours=9))
-          now_kst = now_utc.astimezone(kst)
-          hour_start_kst = now_kst.replace(minute=0, second=0, microsecond=0)
-          hour_end_kst = hour_start_kst + timedelta(hours=1)
-          hour_start_utc = hour_start_kst.astimezone(timezone.utc)
-          hour_end_utc = hour_end_kst.astimezone(timezone.utc)
-
-          should_run = True
-          for run in payload.get("workflow_runs", []):
-              if run.get("id") == run_id:
-                  continue
-              if run.get("conclusion") != "success":
-                  continue
-              created = datetime.strptime(run["created_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-              if hour_start_utc <= created < hour_end_utc:
-                  should_run = False
-                  print(f"already succeeded in this KST hour via run_id={run.get('id')}, skip")
-                  break
-
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
-              out.write(f"should_run={'true' if should_run else 'false'}\n")
-          print("should_run =", should_run)
-          PY
-
       - name: Install dependencies
-        if: steps.gate.outputs.should_run == 'true'
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Network check
-        if: steps.gate.outputs.should_run == 'true'
         run: |
           python - <<'PY'
           import socket
@@ -111,7 +43,6 @@ jobs:
           PY
 
       - name: Run tracker
-        if: steps.gate.outputs.should_run == 'true'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}

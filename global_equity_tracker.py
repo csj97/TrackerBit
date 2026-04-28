@@ -495,7 +495,23 @@ def main():
         raise SystemExit("Missing TELEGRAM_BOT_TOKEN(_EQUITY) or TELEGRAM_CHAT_ID(_EQUITY)")
 
     now_utc = datetime.now(UTC)
-    event_type, event_dt = detect_event(now_utc)
+    force_event = os.getenv("FORCE_EVENT", "").strip().upper()
+    valid_force_events = {
+        "KR_PREOPEN",
+        "KR_MIDCHECK",
+        "KR_POSTCLOSE",
+        "US_PREOPEN",
+        "US_MIDCHECK",
+        "US_POSTCLOSE",
+        "WEEKLY_REVIEW",
+    }
+    if force_event:
+        if force_event not in valid_force_events:
+            raise SystemExit(f"Invalid FORCE_EVENT: {force_event}")
+        event_type, event_dt = force_event, now_utc.astimezone(KST)
+        append_memory(f"FORCE_EVENT 사용: {force_event}")
+    else:
+        event_type, event_dt = detect_event(now_utc)
     if not event_type:
         print("NO_EVENT_WINDOW")
         return

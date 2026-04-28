@@ -2,6 +2,21 @@ name: Global Equity Tracker
 
 on:
   workflow_dispatch:
+    inputs:
+      force_event:
+        description: "Manual test event override (optional)"
+        required: false
+        default: ""
+        type: choice
+        options:
+          - ""
+          - KR_PREOPEN
+          - KR_MIDCHECK
+          - KR_POSTCLOSE
+          - US_PREOPEN
+          - US_MIDCHECK
+          - US_POSTCLOSE
+          - WEEKLY_REVIEW
   schedule:
     - cron: "30 23 * * 0-4" # KR preopen 08:30 KST (Mon-Fri)
     - cron: "30 3 * * 1-5"  # KR midcheck 12:30 KST (Mon-Fri)
@@ -52,6 +67,7 @@ jobs:
           KR_SWING_UNIVERSE: ${{ vars.KR_SWING_UNIVERSE }}
           US_LONG_UNIVERSE: ${{ vars.US_LONG_UNIVERSE }}
           US_SWING_UNIVERSE: ${{ vars.US_SWING_UNIVERSE }}
+          FORCE_EVENT: ${{ github.event.inputs.force_event || '' }}
         run: |
           python global_equity_tracker.py
 
