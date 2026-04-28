@@ -29,8 +29,15 @@ def append_memory(message: str):
 
 
 def check_dns(hosts):
+    ok = []
+    fail = []
     for host in hosts:
-        socket.gethostbyname(host)
+        try:
+            socket.gethostbyname(host)
+            ok.append(host)
+        except Exception as e:
+            fail.append((host, str(e)))
+    return ok, fail
 
 
 def fetch_text(url: str, timeout: int = 20):
@@ -396,7 +403,7 @@ def main():
     if not bot_token or not chat_id:
         raise SystemExit("Missing TELEGRAM_BOT_TOKEN(_MACRO) or TELEGRAM_CHAT_ID(_MACRO)")
 
-    check_dns(
+    ok_hosts, fail_hosts = check_dns(
         [
             "fred.stlouisfed.org",
             "stooq.com",
@@ -406,6 +413,11 @@ def main():
             "api.telegram.org",
         ]
     )
+    if fail_hosts:
+        append_memory("DNS 일부 실패: " + ", ".join([f"{h}({e})" for h, e in fail_hosts[:4]]))
+    # Telegram DNS는 필수. 나머지는 데이터 소스 실패로 처리하고 계속 진행.
+    if not any(h == "api.telegram.org" for h in ok_hosts):
+        raise SystemExit("DNS check failed: api.telegram.org")
 
     data = build_data()
     text, confidence, weak, contradictory = build_analysis(data)

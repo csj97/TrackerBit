@@ -6,3 +6,4 @@
 - [2026-04-27 17:46:13 KST] DNS 실패: [Errno 8] nodename nor servname provided, or not known
 - [2026-04-28 10:08:38 KST] DNS 실패: [Errno 8] nodename nor servname provided, or not known
 - [2026-04-28 11:10:38 KST] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-04-28 12:12:50 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
