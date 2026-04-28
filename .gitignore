@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 latest_report.json
 latest_report_nasdaq.json
+latest_report_global_equity.json

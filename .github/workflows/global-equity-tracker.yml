@@ -1,0 +1,64 @@
+name: Global Equity Tracker
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 23 * * 0-4" # KR preopen 08:30 KST (Mon-Fri)
+    - cron: "30 3 * * 1-5"  # KR midcheck 12:30 KST (Mon-Fri)
+    - cron: "0 7 * * 1-5"   # KR postclose 16:00 KST (Mon-Fri)
+    - cron: "0 13 * * 1-5"  # US preopen 09:00 ET (DST)
+    - cron: "0 14 * * 1-5"  # US preopen 09:00 ET (STD)
+    - cron: "0 16 * * 1-5"  # US midcheck 12:00 ET (DST)
+    - cron: "0 17 * * 1-5"  # US midcheck 12:00 ET (STD)
+    - cron: "30 20 * * 1-5" # US postclose 16:30 ET (DST)
+    - cron: "30 21 * * 1-5" # US postclose 16:30 ET (STD)
+    - cron: "0 1 * * 6"     # Weekly review 10:00 KST (Sat)
+
+concurrency:
+  group: global-equity-tracker
+  cancel-in-progress: false
+
+jobs:
+  run-tracker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      TZ: Asia/Seoul
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Print time
+        run: date
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run global equity tracker
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_BOT_TOKEN_EQUITY: ${{ secrets.TELEGRAM_BOT_TOKEN_EQUITY }}
+          TELEGRAM_CHAT_ID_EQUITY: ${{ secrets.TELEGRAM_CHAT_ID_EQUITY }}
+          KR_LONG_UNIVERSE: ${{ vars.KR_LONG_UNIVERSE }}
+          KR_SWING_UNIVERSE: ${{ vars.KR_SWING_UNIVERSE }}
+          US_LONG_UNIVERSE: ${{ vars.US_LONG_UNIVERSE }}
+          US_SWING_UNIVERSE: ${{ vars.US_SWING_UNIVERSE }}
+        run: |
+          python global_equity_tracker.py
+
+      - name: Upload latest report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: latest-report-global-equity
+          path: latest_report_global_equity.json
+          if-no-files-found: ignore
