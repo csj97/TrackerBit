@@ -7,3 +7,55 @@
 - [2026-04-28 10:08:38 KST] DNS 실패: [Errno 8] nodename nor servname provided, or not known
 - [2026-04-28 11:10:38 KST] DNS 실패: [Errno 8] nodename nor servname provided, or not known
 - [2026-04-28 12:12:50 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-04-28 13:14:02 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-04-28 14:15:51 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-04-28 15:16:11 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-04-28 16:16:39 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-04-28 17:17:02 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-04-29 09:03:57 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-04-29 10:02:30 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-04-29 11:02:58 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-04-30 08:59:54 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-04-30 09:59:58 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-04-30 11:00:34 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-04-30 12:28:28 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-04-30 13:11:56 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-04-30 14:12:39 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-04-30 15:13:04 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-04-30 16:14:06 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-04-30 17:15:52 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-04 10:00:39 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-04 11:01:24 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-04 12:20:32 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-04 13:06:36 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-04 14:07:24 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-04 14:08:16 KST] [BITHUMB] API 실패 fallback 실행: Bithumb ticker 호출 실패: <urlopen error [Errno 1] Operation not permitted>
+- [2026-05-04 14:08:16 KST] [BITHUMB] Telegram 전송 실패: <urlopen error [Errno 1] Operation not permitted>
+- [2026-05-04 16:09:54 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-04 17:12:48 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-06 09:07:40 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-06 10:08:27 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-06 11:10:33 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-07 09:54:07 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-07 10:56:01 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-07 12:04:25 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-07 13:06:37 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-07 13:07:30 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-07 13:08:24 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-07 13:09:35 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-07 13:11:01 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-07 13:12:33 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-07 14:14:03 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- 2026-05-07 14:16:00 KST: User requested that future modification tasks follow the relevant `.md` files first; will prioritize `AGENTS.md` and task-specific markdown guidance.
+- [2026-05-07 15:16:09 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-07 16:18:13 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-07 17:18:59 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-08 09:00:24 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-08 10:01:02 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-08 11:01:32 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-08 12:12:01 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-08 13:14:00 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-08 14:15:02 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-08 15:16:02 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-08 15:16:54 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-08 16:17:04 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
