@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import json
-import math
 import os
 import socket
 import statistics
@@ -17,10 +16,17 @@ MEMORY_PATH = ROOT_DIR / "memory.md"
 REPORT_PATH = ROOT_DIR / "latest_report.json"
 AGENT_TAG = "BITHUMB"
 AGENT_TITLE = "Bithumb Hourly Tracker"
+TOPN = 30
+MIN_TRADE_VALUE_24H = 3_500_000_000
+MIN_SCORE = 72
+MIN_RR2 = 2.0
+MARKET_CAUTION_MIN_SCORE = 82
+MARKET_CAUTION_MIN_RR2 = 2.5
 
 
 def get_json(url: str):
-    with urllib.request.urlopen(url, timeout=25) as r:
+    req = urllib.request.Request(url, headers={"User-Agent": "bithumb-hourly-tracker"})
+    with urllib.request.urlopen(req, timeout=25) as r:
         return json.load(r)
 
 
@@ -49,6 +55,12 @@ def check_dns(hosts):
 
 def to_float(x):
     return float(str(x).replace(",", ""))
+
+
+def pct_change(now, prev):
+    if prev == 0:
+        return 0.0
+    return (now - prev) / prev
 
 
 def parse_candles(data):
@@ -155,14 +167,103 @@ def candle_signals(cd, c4):
     return signals
 
 
-def analyze_symbol(symbol, trade_value_24h, price):
-    d = get_json(f"{BASE}/candlestick/{symbol}_KRW/24h")
-    h4 = get_json(f"{BASE}/candlestick/{symbol}_KRW/4h")
-    if d.get("status") != "0000" or h4.get("status") != "0000":
-        return None
+def get_candles(symbol, interval):
+    payload = get_json(f"{BASE}/candlestick/{symbol}_KRW/{interval}")
+    if payload.get("status") != "0000":
+        raise RuntimeError(f"candlestick API error: {symbol}/{interval}/status={payload.get('status')}")
+    return parse_candles(payload["data"])
 
-    cd = parse_candles(d["data"])
-    c4 = parse_candles(h4["data"])
+
+def analyze_market_regime(ticker_rows, topn=TOPN):
+    btc_d = get_candles("BTC", "24h")
+    btc_h4 = get_candles("BTC", "4h")
+    if len(btc_d) < 420 or len(btc_h4) < 420:
+        return {
+            "status": "MARKET_BAD",
+            "score": 0,
+            "reasons": ["BTC 캔들 이력 부족"],
+            "metrics": {},
+        }
+
+    btc_price = btc_h4[-1][4]
+    d_close = [x[4] for x in btc_d]
+    h4_close = [x[4] for x in btc_h4]
+
+    h4_e50 = ema(h4_close, 50)
+    h4_e200 = ema(h4_close, 200)
+    h4_e400 = ema(h4_close, 400)
+    d_e50 = ema(d_close, 50)
+    d_e200 = ema(d_close, 200)
+    d_e400 = ema(d_close, 400)
+    if None in (h4_e50, h4_e200, h4_e400, d_e50, d_e200, d_e400):
+        return {
+            "status": "MARKET_BAD",
+            "score": 0,
+            "reasons": ["BTC EMA 계산 불가"],
+            "metrics": {},
+        }
+
+    btc_h4_uptrend = h4_e50 > h4_e200 > h4_e400 and btc_price > h4_e50
+    btc_d_uptrend = d_e50 > d_e200 > d_e400 and btc_price > d_e50
+    btc_above_h4_e50 = btc_price > h4_e50
+    btc_change_4h = pct_change(h4_close[-1], h4_close[-2])
+    btc_change_24h = pct_change(h4_close[-1], h4_close[-7]) if len(h4_close) >= 7 else 0.0
+
+    top_rows = ticker_rows[:topn]
+    changes_24h = [x[3] for x in top_rows]
+    up_ratio = sum(1 for x in changes_24h if x > 0) / max(len(changes_24h), 1)
+    median_change = statistics.median(changes_24h) if changes_24h else 0.0
+
+    bad_reasons = []
+    if not btc_h4_uptrend:
+        bad_reasons.append("BTC 4H 추세 약세")
+    if not btc_d_uptrend:
+        bad_reasons.append("BTC 일봉 추세 약세")
+    if btc_change_24h <= -0.025:
+        bad_reasons.append("BTC 24H 낙폭 과도")
+    if up_ratio < 0.35:
+        bad_reasons.append("상위 코인 상승 비율 35% 미만")
+    if median_change <= -0.015:
+        bad_reasons.append("상위 코인 24H 중앙값 -1.5% 이하")
+
+    score = 0
+    score += 25 if btc_h4_uptrend else 0
+    score += 25 if btc_d_uptrend else 0
+    score += 15 if btc_above_h4_e50 else 0
+    score += 10 if btc_change_4h > -0.015 and btc_change_24h > -0.025 else 0
+    score += 15 if up_ratio >= 0.5 else (8 if up_ratio >= 0.35 else 0)
+    score += 10 if median_change > 0 else (5 if median_change > -0.015 else 0)
+
+    if bad_reasons:
+        status = "MARKET_BAD"
+        reasons = bad_reasons
+    elif score >= 80:
+        status = "MARKET_OK"
+        reasons = ["시장 조건 양호"]
+    else:
+        status = "MARKET_CAUTION"
+        reasons = ["시장 강도 애매"]
+
+    return {
+        "status": status,
+        "score": round(score, 1),
+        "reasons": reasons,
+        "metrics": {
+            "btc_price": btc_price,
+            "btc_h4_uptrend": btc_h4_uptrend,
+            "btc_d_uptrend": btc_d_uptrend,
+            "btc_above_h4_e50": btc_above_h4_e50,
+            "btc_change_4h_pct": round(btc_change_4h * 100, 2),
+            "btc_change_24h_pct": round(btc_change_24h * 100, 2),
+            "top30_up_ratio": round(up_ratio, 3),
+            "top30_median_24h_pct": round(median_change * 100, 2),
+        },
+    }
+
+
+def analyze_symbol(symbol, trade_value_24h, price):
+    cd = get_candles(symbol, "24h")
+    c4 = get_candles(symbol, "4h")
 
     # reliability gate
     if len(cd) < 420 or len(c4) < 420:
@@ -238,13 +339,13 @@ def analyze_symbol(symbol, trade_value_24h, price):
         reasons.append("손익비 부족")
 
     passed = (
-        trade_value_24h >= 3_500_000_000
+        trade_value_24h >= MIN_TRADE_VALUE_24H
         and trend_h4
         and (vol_up and (pullback_ok or breakout))
         and (near_support or near_break)
         and overhead < 0.58
-        and rr2 >= 2.0
-        and score >= 72
+        and rr2 >= MIN_RR2
+        and score >= MIN_SCORE
     )
 
     return {
@@ -273,7 +374,7 @@ def analyze_symbol(symbol, trade_value_24h, price):
     }
 
 
-def build_report(topn=30):
+def build_report(topn=TOPN):
     now = now_kst()
     try:
         ticker = get_json(f"{BASE}/ticker/ALL_KRW")
@@ -289,6 +390,7 @@ def build_report(topn=30):
             "summary": summary,
             "errors": [err],
             "topn": topn,
+            "market": None,
             "top3": [],
             "analyzed": [],
             "text": text,
@@ -307,6 +409,7 @@ def build_report(topn=30):
             "summary": summary,
             "errors": [err],
             "topn": topn,
+            "market": None,
             "top3": [],
             "analyzed": [],
             "text": text,
@@ -317,42 +420,82 @@ def build_report(topn=30):
     for k, v in ticker["data"].items():
         if k == "date" or k in {"USDT", "STABLE"}:
             continue
-        rows.append((k, to_float(v["acc_trade_value_24H"]), to_float(v["closing_price"])))
+        change_24h = to_float(v.get("fluctate_rate_24H", 0)) / 100
+        rows.append((k, to_float(v["acc_trade_value_24H"]), to_float(v["closing_price"]), change_24h))
 
     rows.sort(key=lambda x: x[1], reverse=True)
     target = rows[:topn]
 
+    try:
+        market = analyze_market_regime(rows, topn=topn)
+    except Exception as e:
+        market = {
+            "status": "MARKET_BAD",
+            "score": 0,
+            "reasons": [f"시장 상태 분석 실패: {e}"],
+            "metrics": {},
+        }
+
     analyzed = []
-    for sym, tv, p in target:
+    for sym, tv, p, _change_24h in target:
         try:
             r = analyze_symbol(sym, tv, p)
             if r:
                 analyzed.append(r)
+            time.sleep(0.08)
         except Exception as e:
             analyzed.append({"symbol": sym, "status": "EXCLUDE", "reason": f"분석실패:{e}"})
 
     passed = [x for x in analyzed if x.get("status") == "PASS"]
+    if market["status"] == "MARKET_CAUTION":
+        passed = [
+            x
+            for x in passed
+            if x.get("score", 0) >= MARKET_CAUTION_MIN_SCORE and x.get("rr2", 0) >= MARKET_CAUTION_MIN_RR2
+        ]
+    if market["status"] == "MARKET_BAD":
+        passed = []
+
     passed.sort(key=lambda x: (x["score"], x["rr2"], x["trade_value_24h"]), reverse=True)
     top3 = passed[:3]
 
     excluded = [x for x in analyzed if x.get("status") == "EXCLUDE"]
     excluded.sort(key=lambda x: x.get("score", 0), reverse=True)
 
-    status = "OK"
-    summary = f"PASS {len(top3)} / 대상 {topn}"
+    status = "OK" if market["status"] != "MARKET_BAD" else "MARKET_BLOCKED"
+    summary = f"시장 {market['status']}({market['score']}점) / PASS {len(top3)} / 대상 {topn}"
     header = build_header(now, status, summary) + [
         f"- 대상: KRW 거래대금 상위 {topn} (USDT/STABLE 제외)",
         "- 기준: 4H+일봉, 거래량/지지저항/매물대/EMA/피보나치/캔들, 즉시매수 가능성",
+        "- 시장 기준: BTC 4H/일봉 추세, BTC 단기 낙폭, 상위 코인 상승 비율, 상위 코인 중앙 등락률",
+        f"- 시장 판단: {market['status']} / {market['score']}점 / {', '.join(market['reasons'])}",
     ]
+    metrics = market.get("metrics") or {}
+    if metrics:
+        header.extend(
+            [
+                f"- BTC: 4H {metrics.get('btc_change_4h_pct')}% / 24H {metrics.get('btc_change_24h_pct')}%",
+                f"- 상위30 상승비율: {metrics.get('top30_up_ratio')} / 중앙등락률: {metrics.get('top30_median_24h_pct')}%",
+            ]
+        )
 
     if not top3:
-        body = [
-            "",
-            "결론: 지금 당장 매수 가능한 강력 추천 코인 없음",
-            "사유: 손익비 또는 추세/위치 조건 미달",
-            "",
-            "근접 후보(참고, 매수 금지):",
-        ]
+        if market["status"] == "MARKET_BAD":
+            body = [
+                "",
+                "결론: 시장 상태가 좋지 않아 추천 종목 없음",
+                "판단: 지금은 억지 매수 후보를 만들지 않고 관망",
+                "",
+                "근접 후보(참고, 매수 금지):",
+            ]
+        else:
+            body = [
+                "",
+                "결론: 지금 당장 매수 가능한 강력 추천 코인 없음",
+                "사유: 손익비 또는 추세/위치 조건 미달",
+                "",
+                "근접 후보(참고, 매수 금지):",
+            ]
         for r in excluded[:3]:
             body.append(
                 f"- {r['symbol']}: 점수 {r.get('score','-')} / RR2 {r.get('rr2','-')} / 사유 {r.get('reason','-')}"
@@ -381,6 +524,7 @@ def build_report(topn=30):
         "summary": summary,
         "errors": [],
         "topn": topn,
+        "market": market,
         "top3": top3,
         "analyzed": analyzed,
         "text": text,
@@ -416,7 +560,7 @@ def main():
         append_memory(f"DNS 실패: {e}")
         raise SystemExit(f"DNS check failed: {e}")
 
-    report = build_report(topn=30)
+    report = build_report(topn=TOPN)
     with open(REPORT_PATH, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
 
