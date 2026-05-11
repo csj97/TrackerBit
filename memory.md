@@ -59,3 +59,4 @@
 - [2026-05-08 15:16:02 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
 - [2026-05-08 15:16:54 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
 - [2026-05-08 16:17:04 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known
+- [2026-05-08 17:17:43 KST] [BITHUMB] DNS 실패: [Errno 8] nodename nor servname provided, or not known

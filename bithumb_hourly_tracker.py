@@ -394,6 +394,7 @@ def build_report(topn=TOPN):
             "top3": [],
             "analyzed": [],
             "text": text,
+            "should_send": False,
             "api_error": err,
         }
 
@@ -413,6 +414,7 @@ def build_report(topn=TOPN):
             "top3": [],
             "analyzed": [],
             "text": text,
+            "should_send": False,
             "api_error": err,
         }
 
@@ -528,6 +530,7 @@ def build_report(topn=TOPN):
         "top3": top3,
         "analyzed": analyzed,
         "text": text,
+        "should_send": bool(top3),
     }
     return payload
 
@@ -566,6 +569,11 @@ def main():
 
     if report.get("api_error"):
         append_memory(f"API 실패 fallback 실행: {report['api_error']}")
+
+    if not report.get("should_send"):
+        append_memory(f"Telegram 전송 생략: 추천 후보 없음 / {report.get('summary')}")
+        print("SKIPPED", report["generated_at"], report.get("summary"))
+        return
 
     try:
         resp = send_telegram(bot_token, chat_id, report["text"])
